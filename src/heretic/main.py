@@ -326,6 +326,19 @@ def run():
     print("* Obtaining residuals for bad prompts...")
     bad_residuals = model.get_residuals_batched(bad_prompts)
 
+    if settings.filter_to_refusals:
+        bad_responses = model.get_responses_batched(bad_prompts)
+        refused_indices = [
+            index
+            for index, response in enumerate(bad_responses)
+            if evaluator.is_refusal(response)
+        ]
+        print(
+            f"* [bold]{len(refused_indices)}/{bad_residuals.size(0)}[/] bad prompts refused"
+        )
+        bad_residuals = bad_residuals[refused_indices]
+        del bad_responses, refused_indices
+
     harmful_means = bad_residuals.mean(dim=0)
     harmless_means = good_residuals.mean(dim=0)
 
