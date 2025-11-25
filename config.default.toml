@@ -36,6 +36,9 @@ max_batch_size = 128
 # Maximum number of tokens to generate for each response.
 max_response_length = 100
 
+# Whether to filter bad_prompts to the prompts that were actually refused.
+filter_to_refusals = false
+
 # Whether to print prompt/response pairs when counting refusals.
 print_responses = false
 

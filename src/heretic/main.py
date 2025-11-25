@@ -430,6 +430,19 @@ def run():
         good_residuals[:, :, model.massive_dims] = 0
         bad_residuals[:, :, model.massive_dims] = 0
 
+    if settings.filter_to_refusals:
+        bad_responses = model.get_responses_batched(bad_prompts)
+        refused_indices = [
+            index
+            for index, response in enumerate(bad_responses)
+            if evaluator.is_refusal(response)
+        ]
+        print(
+            f"* [bold]{len(refused_indices)}/{bad_residuals.size(0)}[/] bad prompts refused"
+        )
+        bad_residuals = bad_residuals[refused_indices]
+        del bad_responses, refused_indices
+
     good_means = good_residuals.mean(dim=0)
     bad_means = bad_residuals.mean(dim=0)
 
