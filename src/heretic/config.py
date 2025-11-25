@@ -112,6 +112,21 @@ class Settings(BaseSettings):
         description="Maximum number of tokens to generate for each response.",
     )
 
+    orthogonalize_direction: bool = Field(
+        default=False,
+        description="Whether to only remove the harmful part of the refusal direction.",
+    )
+
+    compute_normalized: bool = Field(
+        default=False,
+        description="Whether to compute the abliteration using the row-normalized weights.",
+    )
+
+    preserve_magnitudes: bool = Field(
+        default=False,
+        description="Whether to keep the overall strength of model weights unchanged. Implies compute_normalized.",
+    )
+
     print_responses: bool = Field(
         default=False,
         description="Whether to print prompt/response pairs when counting refusals.",
