@@ -112,6 +112,16 @@ class Settings(BaseSettings):
         description="Maximum number of tokens to generate for each response.",
     )
 
+    direction_scopes: list[str] = Field(
+        default=[
+            # Choose a refusal direction by interpolating between 2 layers and apply it globally.
+            "global",
+            # For each layer within range, apply the layer's own refusal direction to itself.
+            "per layer",
+        ],
+        description="The different refusal direction scopes that can be applied to each trial.",
+    )
+
     orthogonalize_direction: bool = Field(
         default=False,
         description="Whether to only remove the harmful part of the refusal direction.",

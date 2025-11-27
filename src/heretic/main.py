@@ -361,13 +361,13 @@ def run():
         trial_index += 1
         trial.set_user_attr("index", trial_index)
 
-        direction_scope = trial.suggest_categorical(
-            "direction_scope",
-            [
-                "global",
-                "per layer",
-            ],
-        )
+        if len(settings.direction_scopes) > 1:
+            direction_scope = trial.suggest_categorical(
+                "direction_scope",
+                settings.direction_scopes,
+            )
+        else:
+            direction_scope = settings.direction_scopes[0]
 
         last_layer_index = len(model.get_layers()) - 1
 
