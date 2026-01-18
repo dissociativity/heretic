@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import warnings
+from dataclasses import asdict
 from importlib.metadata import version
 from os.path import commonprefix
 from pathlib import Path
@@ -26,6 +27,8 @@ from huggingface_hub import ModelCard, ModelCardData
 from optuna import Trial, TrialPruned
 from optuna.exceptions import ExperimentalWarning
 from optuna.samplers import TPESampler
+from optuna.storages import JournalStorage
+from optuna.storages.journal import JournalFileBackend
 from optuna.study import StudyDirection
 from optuna.trial import TrialState
 from pydantic import ValidationError
@@ -323,6 +326,19 @@ def run():
     print("* Obtaining residuals for bad prompts...")
     bad_residuals = model.get_residuals_batched(bad_prompts)
 
+    if settings.filter_to_refusals:
+        bad_responses = model.get_responses_batched(bad_prompts)
+        refused_indices = [
+            index
+            for index, response in enumerate(bad_responses)
+            if evaluator.is_refusal(response)
+        ]
+        print(
+            f"* [bold]{len(refused_indices)}/{bad_residuals.size(0)}[/] bad prompts refused"
+        )
+        bad_residuals = bad_residuals[refused_indices]
+        del bad_responses, refused_indices
+
     harmful_means = bad_residuals.mean(dim=0)
     harmless_means = good_residuals.mean(dim=0)
 
@@ -350,6 +366,7 @@ def run():
     empty_cache()
 
     trial_index = 0
+    start_index = 0
     start_time = time.perf_counter()
 
     def objective(trial: Trial) -> tuple[float, float]:
@@ -357,13 +374,13 @@ def run():
         trial_index += 1
         trial.set_user_attr("index", trial_index)
 
-        direction_scope = trial.suggest_categorical(
-            "direction_scope",
-            [
-                "global",
-                "per layer",
-            ],
-        )
+        if len(settings.direction_scopes) > 1:
+            direction_scope = trial.suggest_categorical(
+                "direction_scope",
+                settings.direction_scopes,
+            )
+        else:
+            direction_scope = settings.direction_scopes[0]
 
         last_layer_index = len(model.get_layers()) - 1
 
@@ -422,7 +439,7 @@ def run():
             )
 
         trial.set_user_attr("direction_index", direction_index)
-        trial.set_user_attr("parameters", parameters)
+        trial.set_user_attr("parameters", {k: asdict(v) for k, v in parameters.items()})
 
         print()
         print(
@@ -439,7 +456,7 @@ def run():
         score, kl_divergence, refusals = evaluator.get_score()
 
         elapsed_time = time.perf_counter() - start_time
-        remaining_time = (elapsed_time / trial_index) * (
+        remaining_time = (elapsed_time / (trial_index - start_index)) * (
             settings.n_trials - trial_index
         )
         print()
@@ -462,17 +479,41 @@ def run():
             trial.study.stop()
             raise TrialPruned()
 
+    log_file = "log/study.jsonl"
+    resume = os.path.exists(log_file)
+    if resume:
+        choice = prompt_select("Resume previous study?", ["yes", "no"])
+        if choice == "no":
+            os.remove(log_file)
+            resume = False
+
+    if not os.path.exists("log"):
+        os.mkdir("log")
+    backend = JournalFileBackend(log_file)
+    storage = JournalStorage(backend)
+
     study = optuna.create_study(
+        study_name="my_study",
         sampler=TPESampler(
             n_startup_trials=settings.n_startup_trials,
             n_ei_candidates=128,
             multivariate=True,
         ),
+        storage=storage,
         directions=[StudyDirection.MINIMIZE, StudyDirection.MINIMIZE],
+        load_if_exists=True,
     )
+    if resume:
+        print("Resuming existing study.")
+        start_index = len(study.trials)
+        trial_index = start_index
 
     try:
-        study.optimize(objective_wrapper, n_trials=settings.n_trials)
+        remaining_trials = settings.n_trials - start_index
+        if remaining_trials > 0:
+            study.optimize(objective_wrapper, n_trials=remaining_trials)
+        elif remaining_trials < 0:
+            settings.n_trials = start_index
     except KeyboardInterrupt:
         # This additional handler takes care of the small chance that KeyboardInterrupt
         # is raised just between trials, which wouldn't be caught by the handler
@@ -580,7 +621,10 @@ def run():
             model.abliterate(
                 refusal_directions,
                 trial.user_attrs["direction_index"],
-                trial.user_attrs["parameters"],
+                {
+                    k: AbliterationParameters(**v)
+                    for k, v in trial.user_attrs["parameters"].items()
+                },
             )
 
             while True:
