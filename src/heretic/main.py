@@ -322,11 +322,20 @@ def run():
     good_residuals = model.get_residuals_batched(good_prompts)
     print("* Obtaining residuals for bad prompts...")
     bad_residuals = model.get_residuals_batched(bad_prompts)
-    refusal_directions = F.normalize(
-        bad_residuals.mean(dim=0) - good_residuals.mean(dim=0),
-        p=2,
-        dim=1,
-    )
+
+    harmful_means = bad_residuals.mean(dim=0)
+    harmless_means = good_residuals.mean(dim=0)
+
+    refusal_directions = F.normalize(harmful_means - harmless_means, p=2, dim=1)
+
+    if settings.orthogonalize_direction:
+        # Remove only the harmful part of the refusal direction.
+        harmless_directions = F.normalize(harmless_means, p=2, dim=1)
+        projection_vector = torch.sum(refusal_directions * harmless_directions, dim=1)
+        refusal_directions = (
+            refusal_directions - projection_vector.unsqueeze(1) * harmless_directions
+        )
+        refusal_directions = F.normalize(refusal_directions, p=2, dim=1)
 
     analyzer = Analyzer(settings, model, good_residuals, bad_residuals)
 
@@ -383,7 +392,8 @@ def run():
             max_weight = trial.suggest_float(
                 f"{component}.max_weight",
                 0.8,
-                1.5,
+                settings.max_weight_limit,
+                log=settings.max_weight_log_scale,
             )
             max_weight_position = trial.suggest_float(
                 f"{component}.max_weight_position",
